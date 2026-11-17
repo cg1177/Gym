@@ -68,3 +68,13 @@ def test_only_videomme_v2_rows_take_other_option_counts_levels_and_groups(update
     assert VideoMCQATaskData.model_validate({**ROW, **updates})
     with pytest.raises(ValidationError, match="four choices"):
         TaskData.model_validate({**ROW, **updates})
+
+
+def test_training_question_set_rows_take_other_option_counts_but_no_level_or_group():
+    training = {**ROW, "task_id": "invented-set:one", "option_count": 6, "expected_answer": "F"}
+    assert TaskData.model_validate(training).option_count == 6
+    for updates in ({"level": 2}, {"group_id": "group-1"}):
+        with pytest.raises(ValidationError, match="no v2 group or level"):
+            TaskData.model_validate({**training, **updates})
+    with pytest.raises(ValidationError, match="four choices"):
+        TaskData.model_validate({**training, "task_id": "lvbench:one"})

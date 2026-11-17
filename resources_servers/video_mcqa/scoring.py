@@ -233,8 +233,8 @@ def aggregate_scores(
 
 
 # llm_extraction_v1. The judge model sees the text of the prompt the model received (question, options and answer
-# instructions; never the video) and the final answer, and reports only the option that answer gives. The wording is
-# the one NVIDIA's Video-MME-v2 evaluations use, so both read answers alike.
+# instructions; never the video, its frames or their labels) and the final answer, and reports only the option that
+# answer gives. The wording is the one NVIDIA's Video-MME-v2 evaluations use, so both read answers alike.
 LLM_EXTRACTION_PROMPT = """You check one model answer to a multiple-choice question about a video. You do not see the video.
 
 The prompt the model received (the video is left out):
@@ -252,10 +252,16 @@ more than one option, or is empty, use "none". Do not decide which option is cor
 
 Reply with one JSON object only: {{"choice": "<letter or none>"}}"""
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+# Part types of an image in a request's input.
+_IMAGE_PARTS = ("input_image", "image_url")
 
 
 def prompt_text(request_input: object) -> str:
-    """The text parts of a request's input messages, in order; media parts are left out."""
+    """The text parts of a request's input messages, in order, without the media.
+
+    Video and image parts are left out, and so is the label of each image: a text part directly followed by an image
+    part, such as a frame's label in a video sent as labelled frames (task.video_parts).
+    """
     if isinstance(request_input, str):
         return request_input
     parts = []
@@ -263,12 +269,12 @@ def prompt_text(request_input: object) -> str:
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, str):
             parts.append(content)
-        else:
-            parts.extend(
-                part.get("text", "")
-                for part in content or []
-                if isinstance(part, dict) and part.get("type") in ("input_text", "text")
-            )
+            continue
+        content = [part for part in content or [] if isinstance(part, dict)]
+        for index, part in enumerate(content):
+            labels_an_image = index + 1 < len(content) and content[index + 1].get("type") in _IMAGE_PARTS
+            if part.get("type") in ("input_text", "text") and not labels_an_image:
+                parts.append(part.get("text", ""))
     return "\n".join(parts)
 
 

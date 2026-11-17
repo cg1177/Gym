@@ -415,7 +415,7 @@ async def test_videomme_v2_scores_the_judges_choice(tmp_path) -> None:
         VideoMMEV2ResourcesServer(config=VideoMMEV2ResourcesServerConfig(**config), server_client=client)
 
 
-@pytest.mark.parametrize("server_name", ["videomme_v2", "videomme_v1", "lvbench"])
+@pytest.mark.parametrize("server_name", ["videomme_v2", "videomme_v1", "lvbench", "video_mcqa"])
 def test_llm_extraction_configs_name_an_openai_compatible_judge(tmp_path, server_name) -> None:
     path = Path(__file__).parents[2] / server_name / "configs" / f"{server_name}_single_turn_llm_extraction.yaml"
     plain = OmegaConf.load(path.with_name(f"{server_name}_single_turn.yaml"))

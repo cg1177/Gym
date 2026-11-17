@@ -18,6 +18,8 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 
 
 LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Task-ID scopes of the benchmark rows (dataset.SOURCES); every other ID belongs to a training question set.
+_BENCHMARK_SCOPES = ("videomme_v1", "lvbench")
 _NESTED = {"legacy_location": "verifier_metadata"}
 
 
@@ -77,10 +79,17 @@ class VideoMCQATaskData(BaseModel):
 
 
 class TaskData(VideoMCQATaskData):
-    """VideoMME-v1 and LVBench: four choices and no VideoMME-v2 level or group."""
+    """VideoMME-v1 and LVBench: four choices and no VideoMME-v2 level or group.
+
+    The same server also verifies the rows of a training question set (training.py): their task IDs use no benchmark
+    scope, and they may have any number of choices, still with no level or group.
+    """
 
     @model_validator(mode="after")
     def four_ungrouped_choices(self) -> Self:
-        if self.option_count != 4 or self.level is not None or self.group_id is not None:
-            raise ValueError("VideoMME-v1/LVBench require four choices and no v2 group or level")
+        if self.task_id.split(":", 1)[0] in _BENCHMARK_SCOPES:
+            if self.option_count != 4 or self.level is not None or self.group_id is not None:
+                raise ValueError("VideoMME-v1/LVBench require four choices and no v2 group or level")
+        elif self.level is not None or self.group_id is not None:
+            raise ValueError("Training question-set rows have no v2 group or level")
         return self

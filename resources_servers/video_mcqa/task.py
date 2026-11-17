@@ -4,6 +4,7 @@
 """Benchmark-independent separation of model inputs, gold answers and provenance."""
 
 import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Literal, NotRequired, TypedDict, get_args
 
@@ -125,11 +126,19 @@ class InputVideo(TypedDict):
     video_url: str
 
 
+class InputImage(TypedDict):
+    """One frame of a video sent as frames, already materialized by the media-preparation layer."""
+
+    type: Literal["input_image"]
+    image_url: str
+    detail: Literal["auto", "low", "high"]
+
+
 class UserMessage(TypedDict):
     """One user turn; no verifier metadata or benchmark system instructions."""
 
     role: Literal["user"]
-    content: list[InputText | InputVideo]
+    content: list[InputText | InputVideo | InputImage]
 
 
 class ResponsesCreateParams(TypedDict):
@@ -182,11 +191,43 @@ def _letter_question_text(question: VideoQuestion, prompt: PromptStyle) -> str:
     return "\n".join((question.question, *options, "Answer with the option's letter from the given choices directly."))
 
 
+def video_parts(
+    *, video_url: str | None = None, frames: Sequence[tuple[str, str]] | None = None
+) -> list[InputText | InputVideo | InputImage]:
+    """A prepared video as user-turn parts: one ``input_video`` part, or the video as frames.
+
+    ``frames`` are ``(label, image_url)`` pairs in playback order. Each frame is its label as an ``input_text`` part
+    followed by the frame as an ``input_image`` part. A label holds text only, such as the frame's time; the model's
+    chat template places its image token at the image part. Give exactly one of ``video_url`` and ``frames``.
+    """
+    if (video_url is None) == (frames is None):
+        raise ValueError("Give the video either as video_url or as frames")
+    if video_url is not None:
+        _text(video_url, "video_url")
+        return [{"type": "input_video", "video_url": video_url}]
+    if isinstance(frames, (str, bytes)) or not frames:
+        raise ValueError("frames must be a nonempty sequence of (label, image_url) pairs")
+    parts: list[InputText | InputVideo | InputImage] = []
+    for label, image_url in frames:
+        _text(label, "frame label")
+        _text(image_url, "frame image_url")
+        parts.append({"type": "input_text", "text": label})
+        parts.append({"type": "input_image", "image_url": image_url, "detail": "auto"})
+    return parts
+
+
 def prepare_single_turn(
-    question: VideoQuestion, *, expected_answer: str, video_url: str, prompt: PromptStyle = "boxed"
+    question: VideoQuestion,
+    *,
+    expected_answer: str,
+    video_url: str | None = None,
+    frames: Sequence[tuple[str, str]] | None = None,
+    prompt: PromptStyle = "boxed",
 ) -> PreparedTask:
-    """Attach prepared video once; sampling remains an explicit external step."""
-    _text(video_url, "video_url")
+    """Attach the prepared video once, as one video part or as labelled frames (``video_parts``), then the question.
+
+    Sampling remains an explicit external step.
+    """
     if prompt not in get_args(PromptStyle):
         raise ValueError(f"Unknown prompt style {prompt!r}")
     metadata = VerifierMetadata.from_question(question, expected_answer=expected_answer)
@@ -200,7 +241,7 @@ def prepare_single_turn(
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_video", "video_url": video_url},
+                        *video_parts(video_url=video_url, frames=frames),
                         {
                             "type": "input_text",
                             "text": _question_text(question)

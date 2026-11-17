@@ -14,7 +14,7 @@ grades agentic rows (`setting: agentic`) when an agent harness is bound to it.
 | --- | --- |
 | `task_id` | The question's ID |
 | `setting` | `single_turn` or `agentic` |
-| `responses_create_params` | The policy's input, for example the video as an `input_video` part and the question as text |
+| `responses_create_params` | The policy's input: the video, as an `input_video` part or as labelled frames, then the question as text |
 | `verifier_metadata.question` | The question text the judge sees |
 | `verifier_metadata.rubric` | The rubric (below) |
 
@@ -35,6 +35,13 @@ Other keys reach the judge unchanged, for example per-criterion `full_credit`, `
 `task.prepare_single_turn(task_id, question, rubric, video_url=...)` builds a single-turn row; the video can be any
 URL the policy's model server accepts: an http(s) or data URL, or a `file://` URL the server is allowed to read (vLLM's
 `--allowed-local-media-path`).
+
+A row may instead send the video as frames sampled ahead of time, as video_mcqa's training rows do
+(`resources_servers/video_mcqa/README.md`, "A video as labelled frames"): each frame's label as an `input_text` part
+directly followed by the frame as an `input_image` part, then the question last. `task.prepare_single_turn(...,
+frames=[(label, image_url), ...])` builds such a row. The question and its wording in the prompt are the row's own;
+the judge reads the question from `verifier_metadata`, never from the policy's input, so frames and their labels
+never reach it.
 
 ## Grading
 

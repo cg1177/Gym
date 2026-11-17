@@ -61,6 +61,30 @@ def test_a_single_turn_row_shows_the_model_the_video_and_question_only() -> None
     assert "Names the object" not in json.dumps(row["responses_create_params"])
 
 
+FRAMES = [
+    ("This is a video:\nFrame 1 sampled at 0.25 seconds: ", "file:///data/frames/square/00000.jpg"),
+    ("\nFrame 2 sampled at 0.75 seconds: ", "file:///data/frames/square/00001.jpg"),
+]
+
+
+def test_a_frames_row_shows_the_model_labelled_frames_then_the_question() -> None:
+    row = prepare_single_turn("video_qa_rubric:one", "Which way does it move?", RUBRIC, frames=FRAMES)
+    (user,) = row["responses_create_params"]["input"]
+    assert user["content"] == [
+        {"type": "input_text", "text": FRAMES[0][0]},
+        {"type": "input_image", "image_url": FRAMES[0][1], "detail": "auto"},
+        {"type": "input_text", "text": FRAMES[1][0]},
+        {"type": "input_image", "image_url": FRAMES[1][1], "detail": "auto"},
+        {"type": "input_text", "text": PROMPT.format(question="Which way does it move?")},
+    ]
+    assert row["verifier_metadata"] == {"question": "Which way does it move?", "rubric": RUBRIC}
+    assert report([row]).clean
+    VideoQARubricVerifyRequest.model_validate(row | {"response": response("Right.")})
+    for video in ({}, {"video_url": "file:///v.mp4", "frames": FRAMES}, {"frames": []}):
+        with pytest.raises(ValueError):
+            prepare_single_turn("video_qa_rubric:one", "Which way does it move?", RUBRIC, **video)
+
+
 @pytest.mark.parametrize(
     ("task_id", "question", "video_url"),
     [("", "Q?", "file:///v.mp4"), ("one", " ", "file:///v.mp4"), ("one", "Q?", "")],

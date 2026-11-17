@@ -100,13 +100,18 @@ def test_each_server_ships_its_schema(owner):
     )
     flat = {**dataclasses.asdict(metadata), "setting": "single_turn"}
     schema = load_task_data_schema(SERVERS / owner)
-    # Only VideoMME-v2 takes other option counts and levels; every schema takes four ungrouped choices.
+    # Every schema takes four ungrouped choices and only VideoMME-v2 takes levels. The others take other option counts
+    # in a training question set's rows, never in a VideoMME-v1 or LVBench row.
     assert schema.validate_python({**flat, "option_count": 4, "level": None}).option_count == 4
     if owner == "videomme_v2":
         assert schema.validate_python(flat).level == 2
     else:
-        with pytest.raises(ValidationError, match="four choices"):
+        with pytest.raises(ValidationError, match="no v2 group or level"):
             schema.validate_python(flat)
+        assert schema.validate_python({**flat, "level": None}).option_count == 3
+        benchmark_row = {**flat, "level": None, "task_id": f"{'lvbench' if owner == 'lvbench' else 'videomme_v1'}:one"}
+        with pytest.raises(ValidationError, match="four choices"):
+            schema.validate_python(benchmark_row)
 
 
 @pytest.mark.parametrize("owner", ["video_mcqa", *OWNERS])

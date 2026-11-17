@@ -163,6 +163,24 @@ async def test_a_graded_answer_earns_its_share_of_the_rubric_points() -> None:
     assert "circle" not in user["content"] and "example.invalid" not in user["content"]
 
 
+async def test_a_frames_row_is_graded_without_its_frames_or_their_labels() -> None:
+    frames = [(f"\nFrame {k} sampled at {k - 0.5:.2f} seconds: ", f"file:///data/frames/{k:05d}.jpg") for k in (1, 2)]
+    row = prepare_single_turn("video_qa_rubric:frames-1", ROW["verifier_metadata"]["question"], RUBRIC, frames=frames)
+    server, calls = make_server(judgment(60, 40))
+    body = VideoQARubricVerifyRequest.model_validate(row | {"response": response("An orange square moves right.")})
+    result = await server.verify(body)
+    assert (result.outcome, result.reward, result.mask_sample) == ("graded", 1.0, False)
+    (call,) = calls
+    sent = json.dumps(call["json"].messages)
+    assert "Frame" not in sent and "file://" not in sent
+    graded = json.loads(call["json"].messages[1]["content"].split("\n", 1)[1])
+    assert graded == {
+        "question": ROW["verifier_metadata"]["question"],
+        "rubric": RUBRIC,
+        "candidate_final_answer": "An orange square moves right.",
+    }
+
+
 async def test_a_contradiction_caps_the_score() -> None:
     server, _ = make_server(judgment(60, 40, applied=True))
     result = await server.verify(request("An orange square moves to the left."))
