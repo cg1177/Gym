@@ -93,6 +93,7 @@ from nemo_gym.models.token_capture import (
 )
 from nemo_gym.models.token_capture.records import ModelRef
 from nemo_gym.utils import is_nemo_gym_fastapi_entrypoint
+from responses_api_models.vllm_model.opencode_tool_images import has_attached_media, inline_opencode_tool_images
 from responses_api_models.vllm_model.tar_audio import TarAudioReader, resolve_archive_path, validate_relative_path
 
 
@@ -758,6 +759,19 @@ class VLLMModelConfig(BaseResponsesAPIModelConfig):
             "sent as `high`. Requires `is_responses_native: false`."
         ),
     )
+    inline_opencode_tool_images: bool = Field(
+        default=False,
+        description=(
+            "Move the images of OpenCode's `Attached media from tool result:` user message back into the chat tool "
+            "messages they came from, each after the text that announces it (a watch_video frame after its "
+            "`Frame i sampled at t seconds:` line, a view_image or read image after the result's text), and drop "
+            "that message, so a vision model sees each tool's images inside its result, as Nemotron 4's agentic "
+            "video training data has them. A response whose images do not add up to its results is sent as OpenCode "
+            "sent it. Each response is rewritten from its own messages only, so the history OpenCode sends again "
+            "with every call is rewritten the same way each time (opencode_tool_images.py). Chat Completions "
+            "requests only; requires `use_completions_api: false`."
+        ),
+    )
 
     # Whether or not the model can generate a reasoning output, and called again to produce additional reasoning output.
     sequential_reasoning_allowed: bool = True
@@ -892,6 +906,11 @@ class VLLMModelConfig(BaseResponsesAPIModelConfig):
             raise ValueError(
                 "inline_tool_output_images requires use_completions_api=false: /v1/completions takes text-only "
                 "messages, so every inlined image would be refused"
+            )
+        if self.inline_opencode_tool_images and self.use_completions_api:
+            raise ValueError(
+                "inline_opencode_tool_images requires use_completions_api=false: /v1/completions takes text-only "
+                "messages, so OpenCode's tool images are refused there with or without the move"
             )
         if self.preserve_thinking_blocks and self.use_completions_api:
             raise ValueError(
@@ -1603,6 +1622,17 @@ class VLLMModel(SimpleResponsesAPIModel):
             ``client.create_chat_completion``.
         """
         self._strip_hosted_only_tool_fields(body_dict)
+
+        if self.config.inline_opencode_tool_images and body_dict.get("messages"):
+            body_dict["messages"] = inline_opencode_tool_images(body_dict["messages"])
+            if has_attached_media(body_dict["messages"]):
+                # Debug, as the conversion's drops: OpenCode sends the history again with every call, so one such
+                # response would log on every later call.
+                LOG.debug(
+                    "`%s` left an OpenCode attached-media message as it was: its images do not add up to the tool "
+                    "results before it",
+                    self.config.name,
+                )
 
         if self.config.replace_developer_role_with_system:
             for message_dict in body_dict["messages"]:

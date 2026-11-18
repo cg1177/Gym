@@ -160,6 +160,9 @@ def test_the_agentic_config_runs_the_video_mcqa_agent_and_sandbox_with_a_loopbac
     assert sandbox_keys and {key: settings[key] for key in sandbox_keys} == {
         key: v2_resources[key] for key in sandbox_keys
     }
+    # Tool images go back into their tool results, as for the agentic video MCQA configs.
+    assert config["policy_model"] == v2["policy_model"]
+    assert config["policy_model"]["responses_api_models"]["vllm_model"] == {"inline_opencode_tool_images": True}
     v2_environment = v2["videomme_v2_agentic_environment"]["environment_servers"]["single_agent_turn_legacy"]
     rubric_environment = config[f"{name}_environment"]["environment_servers"]["single_agent_turn_legacy"]
     assert {k: v for k, v in rubric_environment.items() if k not in ("resources_server", "agent_server")} == {

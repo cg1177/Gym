@@ -22,6 +22,14 @@ config_paths:
 use_absolute_ip: true
 absolute_ip_server_types: [responses_api_models]
 
+# OpenCode sends the images of a model response's tool results in one user message after them; the policy model server
+# moves each back into its tool result after the text that announces it (a frame after its `Frame i sampled at t
+# seconds:` line), the layout of our agentic video training data. The policy model server must then be vllm_model.
+policy_model:
+  responses_api_models:
+    vllm_model:
+      inline_opencode_tool_images: true
+
 lvbench_agentic:
   resources_servers:
     lvbench:

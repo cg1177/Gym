@@ -20,6 +20,22 @@ Supports the full schema: tool-calling, multi-turn assistant/tool messages,
 images via `image_url` content blocks, and the audio sidechannel
 (`metadata.audio_path` / `audio_paths` / `audio_data` / `audio_ref`).
 
+### OpenCode's tool images
+
+For an OpenAI-compatible provider, OpenCode keeps each tool result's text in
+its tool message and sends the images of all the results of one model response
+in one user message after them (`Attached media from tool result:`). With
+`inline_opencode_tool_images: true` the server moves each image back into its
+tool message, after the text that announces it (a watch_video frame after its
+`Frame i sampled at t seconds:` line, a view_image or read image after the
+result's text), and drops that user message, before the request reaches vLLM,
+whose chat templates render images inside tool messages. A response whose
+images do not add up to its results is sent unchanged. The rewrite reads only
+each response's own messages, so the history that OpenCode sends again with
+every call is rewritten the same way each time, and token capture sees each
+call's prompt extend the previous one. Off by default; the agentic video
+configs (`resources_servers/video_mcqa/README.md`) turn it on.
+
 ### Audio archives
 
 Reuse `simple_agent` with compact rows carrying a JSON-encoded archive/member

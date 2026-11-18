@@ -176,8 +176,13 @@ every request.
 
 OpenCode keeps a tool result's text in the tool message and, for an
 OpenAI-compatible provider, moves its images into the user message after it
-(`Attached media from tool result:`). The frame labels and the images are
-therefore not interleaved; the model matches them by order.
+(`Attached media from tool result:`), so the frame labels and the images are
+not interleaved. The agentic configs turn on the policy model server's
+`inline_opencode_tool_images` (vllm_model), which moves each image back into
+its tool result before the request reaches the engine: each frame right after
+its `Frame i sampled at t seconds:` line, a view_image or read image after the
+result's text. That is the layout of Nemotron 4's agentic video training data.
+The policy model server of these configs is therefore vllm_model.
 
 ### Seeding
 

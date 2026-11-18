@@ -80,6 +80,8 @@ def test_actual_composed_agentic_configs_resolve_and_validate(tmp_path, monkeypa
     assert resource.sandbox_config.env == {"SHELL": "/bin/sh"}
     # A third identical tool call in one model response ends the run, as when the training data was generated.
     assert agent.opencode_config["permission"]["doom_loop"] == "ask"
+    # The policy model server moves each tool image back into its tool result, after its label.
+    assert config["policy_model"] == {"responses_api_models": {"vllm_model": {"inline_opencode_tool_images": True}}}
     assert agent.network_access == "inherit" and agent.sandbox_provider is None
     # The image's Dockerfile installs the binary and the plugin dependencies these pins name.
     dockerfile = (SANDBOX_IMAGE_DIR / "Dockerfile").read_text()
