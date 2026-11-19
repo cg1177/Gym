@@ -36,7 +36,9 @@ lvbench_agentic_oc_video:
     opencode_agent:
       description: Agentic LVBench with OpenCode and the video tools in a sandbox session
       timeout: ${video_agentic_run_seconds}
-      context_window: ${video_agentic_context_window}
+      # Below the engine's context, so that OpenCode compacts before a call is refused for its length (the budgets
+      # in video_agentic_harnesses.yaml).
+      context_window: ${video_agentic_oc_video_context_window}
       max_output_tokens: ${video_agentic_max_output_tokens}
       opencode_config:
         compaction:
@@ -52,6 +54,7 @@ lvbench_agentic_oc_read:
     opencode_agent:
       description: Agentic LVBench with OpenCode's own tools in a sandbox session; frames come from FFmpeg
       plugins: []
+      context_window: ${video_agentic_oc_read_context_window}
 
 lvbench_agentic_pi:
   _inherit_from: video_agentic_pi

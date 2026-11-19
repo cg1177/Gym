@@ -18,14 +18,38 @@
 # VIDEO_MCQA_SANDBOX_IMAGE built from resources_servers/video_mcqa/sandbox_image_harnesses/Dockerfile.
 
 # Context window and per-call output cap (reasoning included) of all four agents: ++video_agentic_budget=256k or 512k,
-# or set the two values directly. OpenCode and Pi take both. Codex takes the context window; its model server caps
-# each call's output, since Codex rejects a request-level output cap.
+# or set the values directly. OpenCode and Pi take both. Codex takes the context window; its model server caps each
+# call's output, since Codex rejects a request-level output cap.
+#
+# Serve the engine with the budget's context window as its maximum length. vLLM refuses a call whose prompt and output
+# cap together exceed it: a prompt above the window minus the output cap (229,376 at 256k, 458,752 at 512k). Pi
+# compacts within a run only on that refusal. OpenCode and Codex compact on their own token counts, and a refused call
+# fails their episode, so they compact earlier: OpenCode is told a smaller context window (it compacts after a call
+# whose tokens reach that window minus 20,000), Codex a compaction limit. Both sit below the refusal point by the most
+# one step adds: 98,304 tokens for OpenCode with the video tools (one watch_video result adds up to about 96,000),
+# 16,384 for OpenCode with read alone, and for Codex twice the output cap plus 8,192 (the reply that crosses the limit,
+# then the compaction call, which carries the whole history).
 video_agentic_budget: 256k
 video_agentic_budgets:
-  256k: {context_window: 262144, max_output_tokens: 32768}
-  512k: {context_window: 524288, max_output_tokens: 65536}
+  256k:
+    context_window: 262144
+    max_output_tokens: 32768
+    oc_video_context_window: 151072  # compacts from 131,072
+    oc_read_context_window: 232992  # compacts from 212,992
+    codex_auto_compact_token_limit: 188416
+  512k:
+    context_window: 524288
+    max_output_tokens: 65536
+    oc_video_context_window: 380448  # compacts from 360,448
+    oc_read_context_window: 462368  # compacts from 442,368
+    # Codex 0.144.4 also caps a model it has no metadata for at a 272,000-token window and compacts near 244,800
+    # tokens, before this limit: at 512k Codex works within about 272,000 tokens.
+    codex_auto_compact_token_limit: 385024
 video_agentic_context_window: ${video_agentic_budgets.${video_agentic_budget}.context_window}
 video_agentic_max_output_tokens: ${video_agentic_budgets.${video_agentic_budget}.max_output_tokens}
+video_agentic_oc_video_context_window: ${video_agentic_budgets.${video_agentic_budget}.oc_video_context_window}
+video_agentic_oc_read_context_window: ${video_agentic_budgets.${video_agentic_budget}.oc_read_context_window}
+video_agentic_codex_auto_compact_token_limit: ${video_agentic_budgets.${video_agentic_budget}.codex_auto_compact_token_limit}
 # Seconds per harness run; the Environment Servers and the lent sandboxes of the harness configs outlast it.
 video_agentic_run_seconds: 7200
 
@@ -77,8 +101,10 @@ video_agentic_codex:
       codex_version: 0.144.4
       concurrency: 16
       timeout: ${video_agentic_run_seconds}
-      # Codex compacts its history by itself near 90% of the window (model_auto_compact_token_limit unset).
       model_context_window: ${video_agentic_context_window}
+      # Codex compacts its history by itself; this limit (90% of the window when unset) keeps it below the engine's
+      # refusal point (see the budgets above).
+      model_auto_compact_token_limit: ${video_agentic_codex_auto_compact_token_limit}
       session_close_timeout_seconds: 90
       # Written to Codex's config as model_reasoning_effort; video_agentic_codex_model would turn a `reasoning.effort`
       # into the chat request's reasoning_effort. Codex 0.144.4 sends no `reasoning` to a Gym model server (seen with

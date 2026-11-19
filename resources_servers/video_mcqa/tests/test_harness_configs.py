@@ -23,6 +23,9 @@ from responses_api_models.vllm_model.app import VLLMModelConfig
 RESOURCES = Path(__file__).parents[2]
 HARNESS_IMAGE = RESOURCES / "video_mcqa" / "sandbox_image_harnesses"
 BUDGETS = {"256k": (262_144, 32_768), "512k": (524_288, 65_536)}
+# Where each agent compacts at each budget: OpenCode with the video tools and with read alone (the context window
+# it is told), Codex (its compaction limit).
+COMPACTION = {"256k": (151_072, 232_992, 188_416), "512k": (380_448, 462_368, 385_024)}
 RESOURCE_TYPES = {
     "videomme_v2": VideoMMEV2ResourcesServerConfig,
     "videomme_v1": VideoMCQAResourcesServerConfig,
@@ -110,8 +113,18 @@ def test_harness_configs_resolve_with_their_settings(tmp_path, monkeypatch, serv
         k: v for k, v in base.items() if k not in changed
     }
     assert oc_video.plugins == [str(PLUGIN_PATH)] and oc_read.plugins == []
+    # The engine serves the budget's context and refuses a call whose prompt and output cap together exceed it.
+    # OpenCode compacts after a call whose tokens reach its context window minus 20,000, Codex at its limit; both
+    # must do so while the next step still fits: one watch_video result adds up to about 96,000 tokens, a read step
+    # about 13,000, and Codex's compaction call carries the whole history with another output cap.
+    refused_above = context - output
+    oc_video_window, oc_read_window, codex_limit = COMPACTION[budget]
+    assert (oc_video.context_window, oc_read.context_window) == (oc_video_window, oc_read_window)
+    assert oc_video.context_window - 20_000 == refused_above - 98_304
+    assert oc_read.context_window - 20_000 == refused_above - 16_384
+    assert codex.model_auto_compact_token_limit == codex_limit == context - 2 * output - 8_192
     for agent in (oc_video, oc_read):
-        assert (agent.context_window, agent.max_output_tokens) == (context, output)
+        assert agent.max_output_tokens == output
         assert agent.opencode_config["compaction"] == {"auto": True} and agent.exclude_compaction_summaries
         assert agent.thinking and agent.image_input
         assert agent.opencode_config["tools"] == {"webfetch": False}
@@ -120,7 +133,7 @@ def test_harness_configs_resolve_with_their_settings(tmp_path, monkeypatch, serv
 
     assert (pi.context_window, pi.max_output_tokens) == (context, output)
     assert pi.auto_compaction and pi.thinking == "high" and pi.image_input
-    assert codex.model_context_window == context and codex.model_auto_compact_token_limit is None
+    assert codex.model_context_window == context
     assert codex.reasoning_effort == "high" and codex.model_server_forwards_reasoning_effort
     assert codex.features == {"multi_agent": False, "code_mode": False}
 

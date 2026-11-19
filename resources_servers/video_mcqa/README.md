@@ -254,23 +254,54 @@ picks one:
 | `<benchmark>_agentic_codex` | `codex_agent` 0.144.4 | the same, opened with Codex's `view_image` |
 
 The four share these settings: automatic compaction on (`compaction.auto` for
-OpenCode, `auto_compaction` for Pi; Codex compacts near 90% of its window by
-itself), reasoning on at level high, 2 hours per run, each harness's own system
-prompt, and no network. `++video_agentic_budget=256k` (the default: a
-262,144-token context, 32,768 output tokens per call) or `512k` (524,288 /
-65,536) sets the budget. OpenCode and Pi take both values; Codex takes the
-window, and its model server, `video_agentic_codex_model`, caps each call's
-output, since Codex rejects a request-level cap. That server is a copy of
-`policy_model` that also sends the images Codex's `view_image` puts in a tool
-output to the engine inside the tool message (`inline_tool_output_images`).
-OpenCode and Pi put tool images in a user message after the tool results.
+OpenCode, `auto_compaction` for Pi; Codex always compacts by itself), reasoning
+on at level high, 2 hours per run, each harness's own system prompt, and no
+network. `++video_agentic_budget=256k` (the default: a 262,144-token context,
+32,768 output tokens per call) or `512k` (524,288 / 65,536) sets the budget.
+OpenCode and Pi take both values; Codex takes the window, and its model server,
+`video_agentic_codex_model`, caps each call's output, since Codex rejects a
+request-level cap. That server is a copy of `policy_model` that also sends the
+images Codex's `view_image` puts in a tool output to the engine inside the tool
+message (`inline_tool_output_images`). OpenCode and Pi put tool images in a user
+message after the tool results.
 
-The policy model server passes the engine's context-length refusal on to the
-harness as a vLLM endpoint returns it (`propagate_context_overflow_errors`), so
-Pi, which otherwise compacts only when a run ends, compacts and continues.
-OpenCode also compacts on that refusal, but its run then exits with an error and
-the episode fails, so serve the engine with a context above the agents' window:
-OpenCode and Codex then compact on usage before a call is refused.
+Serve the engine with the budget's context window as its maximum length
+(262,144 or 524,288 tokens). vLLM refuses a call whose prompt and output cap
+together exceed that length, so a call is refused once its prompt passes
+229,376 (256k) or 458,752 (512k) tokens. The harnesses meet that point
+differently:
+
+- Pi compacts within a run only when a call is refused for its length. The
+  policy model server passes the refusal on as a vLLM endpoint returns it
+  (`propagate_context_overflow_errors`); its default, an empty, length-capped
+  completion, would end Pi's run.
+- OpenCode compacts after a call whose tokens reach its context window minus
+  20,000, and Codex at its `model_auto_compact_token_limit`. A refused call
+  fails their episode (OpenCode compacts, but its run exits with an error;
+  Codex ends the run), so the budget sets both below the refusal point by the
+  most one step adds: one `watch_video` result adds up to about 96,000 tokens,
+  a `read` step about 13,000, and Codex's compaction call carries the whole
+  history with another output cap.
+
+| Budget | Refused above | OpenCode with the video tools: `context_window` (compacts from) | OpenCode with `read`: `context_window` (compacts from) | Codex `model_auto_compact_token_limit` |
+| --- | --- | --- | --- | --- |
+| 256k | 229,376 | 151,072 (131,072) | 232,992 (212,992) | 188,416 |
+| 512k | 458,752 | 380,448 (360,448) | 462,368 (442,368) | 385,024 |
+
+Codex 0.144.4 also caps a model it has no metadata for at a 272,000-token
+window and compacts near 244,800 tokens, so at 512k it works within about
+272,000 tokens. OpenCode's compaction call carries the history without its
+images, with another output cap; the margins leave room for one step, so with
+`read` alone a reply of more than about 23,000 tokens on the call that crosses
+the compaction point, in a history of mostly text, can get the compaction call
+refused, and the run then ends unscored.
+
+An engine that shortens a call's output cap to what is left of its context
+instead of refusing, as NeMo RL's generation server does, refuses only a prompt
+that fills the context. OpenCode and Codex compact there as above. Pi compacts
+only when one step takes its prompt past the whole context; otherwise, once its
+prompt leaves less room than a reply needs, the reply is cut off and Pi's run
+ends without an answer.
 
 The lent sandbox reaches only the model server, so Pi and Codex cannot install
 their runtimes there: the image built from `sandbox_image_harnesses/Dockerfile`
