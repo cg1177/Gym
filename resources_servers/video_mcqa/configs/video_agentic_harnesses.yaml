@@ -29,6 +29,15 @@ video_agentic_max_output_tokens: ${video_agentic_budgets.${video_agentic_budget}
 # Seconds per harness run; the Environment Servers and the lent sandboxes of the harness configs outlast it.
 video_agentic_run_seconds: 7200
 
+# The policy model server (a vllm_model; Codex's model server below is a copy) passes the engine's context-length
+# refusal on to the harness, as a vLLM endpoint answers it, so that a harness can compact and continue. By default
+# vllm_model answers such a call with an empty, length-capped completion instead, which Pi does not read as an
+# overflow: its run ends there.
+policy_model:
+  responses_api_models:
+    vllm_model:
+      propagate_context_overflow_errors: true
+
 video_agentic_pi:
   responses_api_agents:
     pi_agent:

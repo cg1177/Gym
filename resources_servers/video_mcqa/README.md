@@ -265,6 +265,13 @@ output, since Codex rejects a request-level cap. That server is a copy of
 output to the engine inside the tool message (`inline_tool_output_images`).
 OpenCode and Pi put tool images in a user message after the tool results.
 
+The policy model server passes the engine's context-length refusal on to the
+harness as a vLLM endpoint returns it (`propagate_context_overflow_errors`), so
+Pi, which otherwise compacts only when a run ends, compacts and continues.
+OpenCode also compacts on that refusal, but its run then exits with an error and
+the episode fails, so serve the engine with a context above the agents' window:
+OpenCode and Codex then compact on usage before a call is refused.
+
 The lent sandbox reaches only the model server, so Pi and Codex cannot install
 their runtimes there: the image built from `sandbox_image_harnesses/Dockerfile`
 adds them, pinned by lockfiles, to the image above, under

@@ -124,12 +124,15 @@ def test_harness_configs_resolve_with_their_settings(tmp_path, monkeypatch, serv
     assert codex.reasoning_effort == "high" and codex.model_server_forwards_reasoning_effort
     assert codex.features == {"multi_agent": False, "code_mode": False}
 
-    # Codex's model server is the policy's with Codex's conversions and the per-call output cap.
+    # The policy model server passes the engine's context-length refusal on, so that a harness can compact.
     policy = config["policy_model"]["responses_api_models"]["vllm_model"]
+    assert VLLMModelConfig(name="policy_model", **policy).propagate_context_overflow_errors
+    # Codex's model server is the policy's with Codex's conversions and the per-call output cap.
     codex_model_block = config[codex.model_server.name]["responses_api_models"]["vllm_model"]
     codex_model = VLLMModelConfig(name=codex.model_server.name, **codex_model_block)
     assert codex_model.inline_tool_output_images and codex_model.drop_unrepresentable_request_fields
     assert codex_model.sampling_overrides == {"max_tokens": output}
+    assert codex_model.propagate_context_overflow_errors
     assert {k: v for k, v in codex_model_block.items() if k in policy} == policy
 
     # The runtimes the configs name are the ones the harness image installs, at the pinned versions.
