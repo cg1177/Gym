@@ -239,6 +239,38 @@ answer: the configs keep OpenCode's `doom_loop` permission at `ask`, and
 `opencode run` rejects every request that would ask. The same call repeated
 across separate responses does not end the run.
 
+### Harness configs
+
+`<benchmark>_agentic_harnesses.yaml` (videomme_v2, videomme_v1, lvbench,
+video_qa_rubric) puts four agents on the benchmark's agentic resources server,
+each under an Environment Server of its own, so `gym eval run --agent <agent>`
+picks one:
+
+| Agent | Harness | How the model sees the video |
+| --- | --- | --- |
+| `<benchmark>_agentic_oc_video` | `opencode_agent` | `watch_video` and `view_image` (the plugin above) |
+| `<benchmark>_agentic_oc_read` | `opencode_agent`, no plugin | frames it writes with `ffmpeg` in the shell, opened with OpenCode's `read` |
+| `<benchmark>_agentic_pi` | `pi_agent` 0.80.2 | the same, opened with Pi's `read` (`image_input: true`) |
+| `<benchmark>_agentic_codex` | `codex_agent` 0.144.4 | the same, opened with Codex's `view_image` |
+
+The four share these settings: automatic compaction on (`compaction.auto` for
+OpenCode, `auto_compaction` for Pi; Codex compacts near 90% of its window by
+itself), reasoning on at level high, 2 hours per run, each harness's own system
+prompt, and no network. `++video_agentic_budget=256k` (the default: a
+262,144-token context, 32,768 output tokens per call) or `512k` (524,288 /
+65,536) sets the budget. OpenCode and Pi take both values; Codex takes the
+window, and its model server, `video_agentic_codex_model`, caps each call's
+output, since Codex rejects a request-level cap. That server is a copy of
+`policy_model` that also sends the images Codex's `view_image` puts in a tool
+output to the engine inside the tool message (`inline_tool_output_images`).
+OpenCode and Pi put tool images in a user message after the tool results.
+
+The lent sandbox reaches only the model server, so Pi and Codex cannot install
+their runtimes there: the image built from `sandbox_image_harnesses/Dockerfile`
+adds them, pinned by lockfiles, to the image above, under
+`/opt/harness-runtimes`. Set `VIDEO_MCQA_SANDBOX_IMAGE` to that image for these
+configs; the OpenCode agents run in it as in the base image.
+
 ## Verification and metrics
 
 Each run declares a complete cohort before inference: benchmark, official source

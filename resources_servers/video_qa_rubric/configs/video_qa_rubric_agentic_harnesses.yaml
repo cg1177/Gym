@@ -26,6 +26,7 @@ config_paths:
 video_qa_rubric_agentic:
   resources_servers:
     video_qa_rubric:
+      verified: false
       # The harnesses this server's sandbox and grading serve: the agents below.
       allowed_agents: [opencode_agent, pi_agent, codex_agent]
       sandbox_config:

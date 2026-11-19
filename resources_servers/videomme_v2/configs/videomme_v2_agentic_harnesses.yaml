@@ -24,6 +24,7 @@ config_paths:
 videomme_v2_agentic:
   resources_servers:
     videomme_v2:
+      verified: false
       # The harnesses this server's sandbox and grading serve: the agents below.
       allowed_agents: [opencode_agent, pi_agent, codex_agent]
       sandbox_config:

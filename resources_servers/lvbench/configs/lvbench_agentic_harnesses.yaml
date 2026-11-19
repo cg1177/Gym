@@ -23,6 +23,7 @@ config_paths:
 lvbench_agentic:
   resources_servers:
     lvbench:
+      verified: false
       # The harnesses this server's sandbox and grading serve: the agents below.
       allowed_agents: [opencode_agent, pi_agent, codex_agent]
       sandbox_config:
