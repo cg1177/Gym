@@ -168,3 +168,26 @@ def test_recorded_task_directories_are_valid_json(tmp_path: Path, home: str) -> 
     assert result.returncode == 0, result.stderr
     recorded = json.loads((tmp_path / "task-env.json").read_text())
     assert recorded["HOME"] == home and recorded["XDG_CONFIG_HOME"] == f"{home}\x01\x1fconfig"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for the OpenCode plugin")
+def test_model_calls_name_their_opencode_agent(tmp_path: Path) -> None:
+    shutil.copyfile(PLUGIN, tmp_path / "task_environment.mjs")
+    env = {"HOME": "/task/home", "XDG_CONFIG_HOME": "/task/config", "XDG_DATA_HOME": "/task/data",
+           "XDG_CACHE_HOME": "/task/cache", "XDG_STATE_HOME": "/task/state"}
+    (tmp_path / "task-env.json").write_text(json.dumps(env))
+    script = """
+import { TaskEnvironment } from "./task_environment.mjs";
+const hooks = await TaskEnvironment();
+const headers = async (input) => { const output = {headers: {Kept: "yes"}}; await hooks["chat.headers"](input, output); return output.headers; };
+console.log(JSON.stringify([await headers({agent: "compaction"}), await headers({agent: "build"}), await headers({})]));
+"""
+    (tmp_path / "probe.mjs").write_text(script)
+    result = subprocess.run([shutil.which("node"), str(tmp_path / "probe.mjs")], capture_output=True, text=True,
+                            timeout=10, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [
+        {"Kept": "yes", "X-OpenCode-Agent": "compaction"},
+        {"Kept": "yes", "X-OpenCode-Agent": "build"},
+        {"Kept": "yes"},
+    ]

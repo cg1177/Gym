@@ -16,6 +16,11 @@ export const TaskEnvironment = async () => {
     "shell.env": async (_input, output) => {
       Object.assign(output.env, env);
     },
+    // The OpenCode agent of each model call (build, compaction, title, ...), so a model server can tell a
+    // compaction call apart (vllm_model keep_compaction_calls_dir).
+    "chat.headers": async (input, output) => {
+      if (typeof input?.agent === "string" && input.agent) output.headers["X-OpenCode-Agent"] = input.agent;
+    },
   };
   // OpenCode logs plugin initialization failures and continues without the hook.
   // The adapter requires this receipt before it accepts the episode for grading.
