@@ -201,6 +201,12 @@ reasoning tokens. Under the default `output_token_policy: fixed`, an adapter-own
 `max_output_tokens` is rejected in sandbox sessions because a total-response budget is not implemented. Model Server
 configuration must not replace the agent's cap with a larger value. Enforcement is tested with Pi 0.80.2.
 
+Set `accept_request_generation_controls: true` when every episode request carries `temperature`, `top_p` and
+`max_output_tokens` and the Model Server applies its own sampling (for example vllm_model's `sampling_overrides`).
+Sandbox sessions then accept the three fields, leave the sampling to the Model Server, and read `max_output_tokens` as
+the limit for each model call, as other Gym agents read it: a value below the agent's `max_output_tokens` is still
+rejected, and the agent's cap stays in force.
+
 ## Lifecycle and ownership
 
 1. Environment Server asks Resources to seed a task. Resources creates the sandbox.

@@ -1919,6 +1919,45 @@ async def test_sandbox_rejects_unsupported_controls(setup, control):
         sandbox.launch.assert_not_awaited()
 
 
+def test_request_generation_controls_are_refused_by_default(setup):
+    agent, _ = setup
+    assert agent.config.accept_request_generation_controls is False
+    body = NeMoGymResponseCreateParamsNonStreaming(
+        input="task", temperature=1.0, top_p=1.0, max_output_tokens=agent.config.max_output_tokens
+    )
+    with pytest.raises(HTTPException) as error:
+        agent._validate_request(body)
+    assert error.value.status_code == 422
+
+
+async def test_sandbox_accepts_request_generation_controls_when_enabled(setup):
+    """Pi runs a request that carries temperature, top_p and a max_output_tokens no tighter than its own limit for
+    each model call, and keeps that own limit in its model config."""
+    agent, sandbox = setup
+    agent.config.accept_request_generation_controls = True
+    agent.config.max_output_tokens = 4096
+    request = Request({"type": "http", "headers": [], "session": {}, "path_params": {"rollout_id": "pi-smoke-a2"}})
+    seeded = await agent.seed_agent_session(request, seed())
+    body = NeMoGymResponseCreateParamsNonStreaming(input="task", temperature=1.0, top_p=1.0, max_output_tokens=4096)
+    response = await agent.responses(request, body)
+    assert response.status == "completed"
+    sandbox.launch.assert_awaited_once()
+    models = json.loads(sandbox.files[f"{sandbox.directory}/home/.pi/agent/models.json"])
+    assert models["providers"]["nemo"]["models"][0]["maxTokens"] == 4096
+    await agent.close_agent_session(request, AgentCloseSessionRequest(**close_body(seeded.agent_session_id)))
+
+
+@pytest.mark.parametrize("control", [{"max_output_tokens": 4095}, {"store": True}, {"metadata": {"ignored": "value"}}])
+def test_enabled_request_generation_controls_still_refuse_others(setup, control):
+    """A tighter limit for each model call and the other unsupported fields stay refused with the switch on."""
+    agent, _ = setup
+    agent.config.accept_request_generation_controls = True
+    agent.config.max_output_tokens = 4096
+    with pytest.raises(HTTPException) as error:
+        agent._validate_request(NeMoGymResponseCreateParamsNonStreaming(input="task", **control))
+    assert error.value.status_code == 422
+
+
 async def test_local_instructions_match_sandbox_prompt(setup):
     agent, _ = setup
     agent.config.system_prompt = "config"

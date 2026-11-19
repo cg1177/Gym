@@ -625,6 +625,14 @@ class CodexAgentConfig(BaseResponsesAPIAgentConfig):
     # model server forwards Codex's `reasoning` field unchanged to a backend that honors it, and
     # confirm it in captured model calls.
     model_server_forwards_reasoning_effort: bool = False
+    # Sandbox sessions refuse a request's temperature, top_p and max_output_tokens: Codex applies none of them. Set
+    # accept_request_generation_controls when every episode request carries them and the model server applies its
+    # own sampling and output limit for each model call (for example vllm_model's sampling_overrides): the request's
+    # sampling is then left to the model server, and its max_output_tokens, read as the limit for each model call as
+    # other Gym agents read it, is accepted when it is at least model_server_max_output_tokens, the limit the model
+    # server enforces. A tighter limit is still refused.
+    accept_request_generation_controls: bool = False
+    model_server_max_output_tokens: int | None = Field(default=None, gt=0, strict=True)
     # Sandbox sessions start Codex with only PATH, LANG, LC_ALL, HOME and the XDG directories
     # from the sandbox. Set true to give Codex (and so its shell tools) the sandbox's full
     # environment, as a harness launched directly in the task container sees it, keeping only
@@ -712,6 +720,16 @@ class CodexAgentConfig(BaseResponsesAPIAgentConfig):
             and self.model_auto_compact_token_limit > self.model_context_window * 9 // 10
         ):
             raise ValueError("model_auto_compact_token_limit must not exceed 90% of model_context_window")
+        return self
+
+    @model_validator(mode="after")
+    def validate_request_generation_controls(self) -> "CodexAgentConfig":
+        """Accepting a request's max_output_tokens needs the limit the model server enforces for each call."""
+        if self.accept_request_generation_controls and self.model_server_max_output_tokens is None:
+            raise ValueError(
+                "accept_request_generation_controls needs model_server_max_output_tokens, the output limit the model "
+                "server enforces for each model call"
+            )
         return self
 
     @model_validator(mode="after")
@@ -1004,6 +1022,17 @@ class CodexAgent(SimpleResponsesAPIAgent):
             "prompt_cache_key",
             "prompt_cache_retention",
         )
+        if self.config.accept_request_generation_controls:
+            limit = self.config.model_server_max_output_tokens
+            if body.max_output_tokens is not None and body.max_output_tokens < limit:
+                raise HTTPException(
+                    422,
+                    f"Codex in the task sandbox: the model server's limit for each model call is {limit} output "
+                    f"tokens; a request cannot lower it to {body.max_output_tokens}",
+                )
+            unsupported = tuple(
+                name for name in unsupported if name not in ("max_output_tokens", "temperature", "top_p")
+            )
         values = body.model_dump(mode="json")
         for name in unsupported:
             if values.get(name) is not None:

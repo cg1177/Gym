@@ -146,7 +146,12 @@ existing outcomes.
 Request `max_output_tokens`, `temperature`, `top_p`, reasoning controls, and unsupported tool
 policies are rejected rather than ignored. Codex cannot enforce these request-level controls
 for a custom Gym provider. Set per-call generation settings on the Model Server and inspect
-captured requests to verify the effective values. A configured `reasoning_effort` is likewise
+captured requests to verify the effective values. When every episode request carries `temperature`,
+`top_p` and `max_output_tokens` and the Model Server applies its own sampling and output limit for each
+model call (for example vllm_model's `sampling_overrides`), set `accept_request_generation_controls: true`
+with `model_server_max_output_tokens`, that limit: sandbox sessions then accept the three fields, leave
+the sampling to the Model Server, and reject only a `max_output_tokens` below
+`model_server_max_output_tokens`. A configured `reasoning_effort` is likewise
 rejected in sandbox sessions unless `model_server_forwards_reasoning_effort: true` records the
 operator's check that the Model Server forwards Codex's `reasoning` field unchanged to a
 backend that honors it, for example a Model Server that relays Codex's Responses requests

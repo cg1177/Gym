@@ -1324,6 +1324,53 @@ def test_rejected_request_does_not_consume_activation(setup):
     sandbox.launch.assert_awaited_once()
 
 
+def test_request_generation_controls_are_refused_by_default(setup):
+    agent, sandbox = setup
+    assert agent.config.accept_request_generation_controls is False
+    with TestClient(agent.setup_webserver()) as client:
+        client.post("/v1/agent_sessions", json=seed().model_dump(mode="json")).raise_for_status()
+        result = client.post(
+            "/ng-rollout/codex-smoke-a2/v1/responses",
+            json={"input": "task", "temperature": 1.0, "top_p": 1.0, "max_output_tokens": 65536},
+        )
+        assert result.status_code == 422, result.text
+    sandbox.launch.assert_not_awaited()
+
+
+def test_request_generation_controls_accepted_when_enabled(setup):
+    """Codex runs a request that carries temperature, top_p and a max_output_tokens no tighter than the limit its
+    model server enforces for each call; a tighter limit is refused before the activation is used."""
+    agent, sandbox = setup
+    agent.config.model_server_max_output_tokens = 65536
+    agent.config.accept_request_generation_controls = True
+    with TestClient(agent.setup_webserver()) as client:
+        client.post("/v1/agent_sessions", json=seed().model_dump(mode="json")).raise_for_status()
+        path = "/ng-rollout/codex-smoke-a2/v1/responses"
+        tighter = client.post(path, json={"input": "task", "max_output_tokens": 65535})
+        assert tighter.status_code == 422, tighter.text
+        assert client.post(path, json={"input": "task", "store": True}).status_code == 422
+        sandbox.launch.assert_not_awaited()
+        accepted = client.post(
+            path, json={"input": "task", "temperature": 1.0, "top_p": 1.0, "max_output_tokens": 65536}
+        )
+        assert accepted.status_code == 200, accepted.text
+    sandbox.launch.assert_awaited_once()
+
+
+def test_request_generation_controls_need_the_model_server_limit():
+    with pytest.raises(ValidationError, match="model_server_max_output_tokens"):
+        CodexAgentConfig(
+            name="codex",
+            host="localhost",
+            port=8001,
+            entrypoint="app.py",
+            num_workers=1,
+            model_server={"type": "responses_api_models", "name": "policy"},
+            codex_version="0.144.4",
+            accept_request_generation_controls=True,
+        )
+
+
 @pytest.mark.parametrize(
     "metadata",
     [

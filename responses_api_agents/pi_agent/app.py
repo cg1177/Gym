@@ -664,6 +664,17 @@ class PiAgentConfig(BaseResponsesAPIAgentConfig):
     context_window: int = 262144
     max_output_tokens: int = 131072
     output_token_policy: Literal["fixed", "remaining_context"] = "fixed"
+    accept_request_generation_controls: bool = Field(
+        default=False,
+        description=(
+            "Accept a sandbox session request's `temperature`, `top_p` and `max_output_tokens`, which are refused by "
+            "default because Pi applies none of them. Set true when every episode request carries them and the model "
+            "server applies its own sampling (for example vllm_model's `sampling_overrides`): the request's sampling "
+            "is then left to the model server, and its `max_output_tokens`, read as the limit for each model call as "
+            "other Gym agents read it, is accepted when it is at least this agent's `max_output_tokens`. A tighter "
+            "limit is still refused."
+        ),
+    )
     auto_compaction: bool = True
     image_input: bool = Field(
         default=False,
@@ -927,13 +938,22 @@ class PiAgent(SimpleResponsesAPIAgent):
         """
         if body.model is not None and body.model != self.config.model:
             raise HTTPException(422, "Pi model must match the configured model")
-        if body.max_output_tokens is not None:
+        accept_controls = self.config.accept_request_generation_controls
+        if body.max_output_tokens is not None and not accept_controls:
             raise HTTPException(
                 422,
                 "Pi does not support the total max_output_tokens budget; "
                 "configure the agent's max_output_tokens for a per-model-call limit instead",
             )
+        if body.max_output_tokens is not None and body.max_output_tokens < self.config.max_output_tokens:
+            raise HTTPException(
+                422,
+                f"Pi's limit for each model call is the agent's max_output_tokens ({self.config.max_output_tokens}); "
+                f"a request cannot lower it to {body.max_output_tokens}",
+            )
         supported = {"input", "instructions", "model"}
+        if accept_controls:
+            supported |= {"temperature", "top_p", "max_output_tokens"}
         for name, field in type(body).model_fields.items():
             if name in supported:
                 continue
