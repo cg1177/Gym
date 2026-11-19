@@ -306,8 +306,20 @@ ends without an answer.
 The lent sandbox reaches only the model server, so Pi and Codex cannot install
 their runtimes there: the image built from `sandbox_image_harnesses/Dockerfile`
 adds them, pinned by lockfiles, to the image above, under
-`/opt/harness-runtimes`. Set `VIDEO_MCQA_SANDBOX_IMAGE` to that image for these
-configs; the OpenCode agents run in it as in the base image.
+`/opt/harness-runtimes`. Its `BASE_IMAGE` has no default: build the image above
+from this tree first, then this one on it, and set `VIDEO_MCQA_SANDBOX_IMAGE` to
+the result for these configs; the OpenCode agents run in it as in the base
+image.
+
+```bash
+docker build --platform linux/amd64 -t video-mcqa-sandbox:local \
+    resources_servers/video_mcqa/sandbox_image
+docker build --platform linux/amd64 --provenance=false \
+    --build-arg BASE_IMAGE=video-mcqa-sandbox:local \
+    -t <registry>/video-mcqa-sandbox:<tag> \
+    resources_servers/video_mcqa/sandbox_image_harnesses
+export VIDEO_MCQA_SANDBOX_IMAGE=<registry>/video-mcqa-sandbox:<tag>
+```
 
 ## Verification and metrics
 

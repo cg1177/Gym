@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sandbox image of the image-only agentic video configs (configs/*_agentic_image_only.yaml of videomme_v2, videomme_v1,
+# Sandbox image of the agentic video harness configs (configs/*_agentic_harnesses.yaml of videomme_v2, videomme_v1,
 # lvbench and video_qa_rubric): the agentic video sandbox image (sandbox_image/Dockerfile) with the runtimes of Pi and
 # Codex added. The lent sandbox reaches only the model server, so pi_agent and codex_agent cannot install their
 # runtimes there; the configs point each adapter's sandbox_runtime_dir at the directory below, and the adapter checks
