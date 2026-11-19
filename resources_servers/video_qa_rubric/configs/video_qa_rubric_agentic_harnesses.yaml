@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Agentic open-ended video questions with four harness setups on video_qa_rubric_agentic's resources server
+# (video_qa_rubric_agentic.yaml), which lends each episode's sandbox with its video and has the judge grade the
+# answer against the question's rubric as there:
+#
+# - video_qa_rubric_agentic_oc_video: video_qa_rubric_agentic_opencode (OpenCode with the video tools) at the shared
+#   settings below;
+# - video_qa_rubric_agentic_oc_read: the same without the video tools plugin: the model samples frames itself with
+#   FFmpeg in the shell and looks at them with OpenCode's own read;
+# - video_qa_rubric_agentic_pi: Pi, frames from FFmpeg, Pi's own read;
+# - video_qa_rubric_agentic_codex: Codex, frames from FFmpeg, Codex's own view_image.
+#
+# Shared settings, in all four: automatic compaction on, reasoning at level high, 2 hours per run, each harness's own
+# system prompt, no network. Pick the budget with ++video_agentic_budget=256k (262,144-token context, 32,768-token
+# output per call) or 512k (524,288 / 65,536). Each agent has an Environment Server of its own, a copy of
+# video_qa_rubric_agentic_environment, so `gym eval run --agent <agent>` picks the harness. The Pi and Codex
+# settings, the budgets and Codex's model server are in
+# resources_servers/video_mcqa/configs/video_agentic_harnesses.yaml. The sandbox image must also carry the Pi and
+# Codex runtimes: VIDEO_MCQA_SANDBOX_IMAGE built from
+# resources_servers/video_mcqa/sandbox_image_harnesses/Dockerfile.
+config_paths:
+  - resources_servers/video_qa_rubric/configs/video_qa_rubric_agentic.yaml
+  - resources_servers/video_mcqa/configs/video_agentic_harnesses.yaml
+
+video_qa_rubric_agentic:
+  resources_servers:
+    video_qa_rubric:
+      # The harnesses this server's sandbox and grading serve: the agents below.
+      allowed_agents: [opencode_agent, pi_agent, codex_agent]
+      sandbox_config:
+        # Above the episode deadline of the Environment Servers below.
+        ttl_s: 12600
+
+video_qa_rubric_agentic_oc_video:
+  _copy: video_qa_rubric_agentic_opencode
+  responses_api_agents:
+    opencode_agent:
+      description: Agentic open-ended video QA with OpenCode and the video tools in a sandbox session
+      timeout: ${video_agentic_run_seconds}
+      context_window: ${video_agentic_context_window}
+      max_output_tokens: ${video_agentic_max_output_tokens}
+      opencode_config:
+        compaction:
+          # OpenCode summarizes the session when the context fills and continues from the summary.
+          auto: true
+      # A run can end on a compaction; grade its last answer, not the summary.
+      exclude_compaction_summaries: true
+      datasets: []
+
+video_qa_rubric_agentic_oc_read:
+  _copy: video_qa_rubric_agentic_oc_video
+  responses_api_agents:
+    opencode_agent:
+      description: Agentic open-ended video QA with OpenCode's own tools in a sandbox session; frames come from FFmpeg
+      plugins: []
+
+video_qa_rubric_agentic_pi:
+  _inherit_from: video_agentic_pi
+  responses_api_agents:
+    pi_agent:
+      description: Agentic open-ended video QA with Pi's own tools in a sandbox session; frames come from FFmpeg
+
+video_qa_rubric_agentic_codex:
+  _inherit_from: video_agentic_codex
+  responses_api_agents:
+    codex_agent:
+      description: Agentic open-ended video QA with Codex's own tools in a sandbox session; frames come from FFmpeg
+
+video_qa_rubric_agentic_oc_video_environment:
+  _copy: video_qa_rubric_agentic_environment
+  environment_servers:
+    single_agent_turn_legacy:
+      agent_server:
+        name: video_qa_rubric_agentic_oc_video
+      # Above the sandbox start (ready_timeout_s), the video upload, the 2-hour run and grading.
+      default_episode_timeout_seconds: 10800
+
+video_qa_rubric_agentic_oc_read_environment:
+  _copy: video_qa_rubric_agentic_environment
+  environment_servers:
+    single_agent_turn_legacy:
+      agent_server:
+        name: video_qa_rubric_agentic_oc_read
+      # Above the sandbox start (ready_timeout_s), the video upload, the 2-hour run and grading.
+      default_episode_timeout_seconds: 10800
+
+video_qa_rubric_agentic_pi_environment:
+  _copy: video_qa_rubric_agentic_environment
+  environment_servers:
+    single_agent_turn_legacy:
+      agent_server:
+        name: video_qa_rubric_agentic_pi
+      # Above the sandbox start (ready_timeout_s), the video upload, the 2-hour run and grading.
+      default_episode_timeout_seconds: 10800
+
+video_qa_rubric_agentic_codex_environment:
+  _copy: video_qa_rubric_agentic_environment
+  environment_servers:
+    single_agent_turn_legacy:
+      agent_server:
+        name: video_qa_rubric_agentic_codex
+      # Above the sandbox start (ready_timeout_s), the video upload, the 2-hour run and grading.
+      default_episode_timeout_seconds: 10800

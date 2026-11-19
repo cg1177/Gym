@@ -1,0 +1,102 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Shared settings of the agentic video harness configs (<benchmark>_agentic_harnesses.yaml of videomme_v2, videomme_v1,
+# lvbench and video_qa_rubric). Each of those configs puts four agents on its benchmark's agentic resources server,
+# each under an Environment Server of its own:
+#
+# - <benchmark>_agentic_oc_video: the benchmark's OpenCode agent, with the video tools (watch_video, view_image);
+# - <benchmark>_agentic_oc_read: the same OpenCode without the video tools plugin: the model samples frames itself with
+#   FFmpeg in the shell and looks at them with OpenCode's own read;
+# - <benchmark>_agentic_pi: Pi, frames from FFmpeg, Pi's own read for images;
+# - <benchmark>_agentic_codex: Codex, frames from FFmpeg, Codex's own view_image for images.
+#
+# All four: automatic compaction on (Codex compacts by itself and cannot be told not to), reasoning on at level high,
+# 2 hours per run, each harness's own system prompt, no network (the lent sandbox reaches only the model server),
+# images where each harness puts them. Sampling settings belong on the policy model server.
+#
+# The lent sandbox reaches only the model server, so the sandbox image must carry the Pi and Codex runtimes:
+# VIDEO_MCQA_SANDBOX_IMAGE built from resources_servers/video_mcqa/sandbox_image_harnesses/Dockerfile.
+
+# Context window and per-call output cap (reasoning included) of all four agents: ++video_agentic_budget=256k or 512k,
+# or set the two values directly. OpenCode and Pi take both. Codex takes the context window; its model server caps
+# each call's output, since Codex rejects a request-level output cap.
+video_agentic_budget: 256k
+video_agentic_budgets:
+  256k: {context_window: 262144, max_output_tokens: 32768}
+  512k: {context_window: 524288, max_output_tokens: 65536}
+video_agentic_context_window: ${video_agentic_budgets.${video_agentic_budget}.context_window}
+video_agentic_max_output_tokens: ${video_agentic_budgets.${video_agentic_budget}.max_output_tokens}
+# Seconds per harness run; the Environment Servers and the lent sandboxes of the harness configs outlast it.
+video_agentic_run_seconds: 7200
+
+video_agentic_pi:
+  responses_api_agents:
+    pi_agent:
+      entrypoint: app.py
+      host: 127.0.0.1
+      # pi_agent serves from one process.
+      num_workers: 1
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      model: ${policy_model_name}
+      pi_version: 0.80.2
+      concurrency: 16
+      timeout: ${video_agentic_run_seconds}
+      context_window: ${video_agentic_context_window}
+      max_output_tokens: ${video_agentic_max_output_tokens}
+      session_close_timeout_seconds: 90
+      # Pi's --thinking level. pi_agent tells Pi that the Gym model server takes no reasoning_effort, so the level
+      # does not reach the model; the policy's serving setup decides how it reasons, as for OpenCode.
+      thinking: high
+      # Pi passes the images its read tool returns to the model only when image input is declared.
+      image_input: true
+      auto_compaction: true
+      # The lent sandbox cannot download Pi: the image carries its runtime (sandbox_image_harnesses).
+      sandbox_runtime_dir: /opt/harness-runtimes/pi
+
+video_agentic_codex:
+  responses_api_agents:
+    codex_agent:
+      entrypoint: app.py
+      host: 127.0.0.1
+      num_workers: 1
+      model_server:
+        type: responses_api_models
+        name: video_agentic_codex_model
+      model: ${policy_model_name}
+      codex_version: 0.144.4
+      concurrency: 16
+      timeout: ${video_agentic_run_seconds}
+      # Codex compacts its history by itself near 90% of the window (model_auto_compact_token_limit unset).
+      model_context_window: ${video_agentic_context_window}
+      session_close_timeout_seconds: 90
+      # Written to Codex's config as model_reasoning_effort; video_agentic_codex_model would turn a `reasoning.effort`
+      # into the chat request's reasoning_effort. Codex 0.144.4 sends no `reasoning` to a Gym model server (seen with
+      # the served name and with gpt-5-codex), so the policy's serving setup decides the level, as for the others.
+      reasoning_effort: high
+      model_server_forwards_reasoning_effort: true
+      # The task sandbox is the isolation. Codex's multi-agent tools stay off (codex_agent's default features).
+      sandbox_mode: danger-full-access
+      # The lent sandbox cannot download Codex: the image carries its runtime (sandbox_image_harnesses).
+      sandbox_runtime_dir: /opt/harness-runtimes/codex
+
+# The policy model server as Codex needs it: the same engine and settings (a copy of policy_model), plus the
+# conversions of Codex's Responses requests, and the per-call output cap.
+video_agentic_codex_model:
+  _copy: policy_model
+  responses_api_models:
+    vllm_model:
+      # view_image puts the image in the tool output; send it to the engine inside the tool message.
+      inline_tool_output_images: true
+      # Codex's `include` and `reasoning.context: all_turns` have no Chat Completions form.
+      drop_unrepresentable_request_fields: true
+      # Codex's freeform apply_patch tool, offered to the model as a function tool.
+      custom_tool_strategy: function_bridge
+      drop_custom_tools: false
+      # Codex's hosted tools (web search), which the engine cannot run.
+      drop_hosted_tools: true
+      # Under Codex's stream idle timeout while a long reply is generated.
+      stream_keepalive_s: 15
+      sampling_overrides:
+        max_tokens: ${video_agentic_max_output_tokens}
