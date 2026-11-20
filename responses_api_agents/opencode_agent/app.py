@@ -153,6 +153,12 @@ _TESTED_OUTCOME_VERSION = "1.17.11"
 _TESTED_OPENCODE2_OUTCOME_VERSION = OPENCODE_V2_VERSION
 _API_ERROR = "APIError"
 _CONTEXT_OVERFLOW_ERROR = "ContextOverflowError"
+# OpenCode 1.17.11 asks for the doom_loop permission when one model response holds three identical tool calls in a
+# row; `opencode run` has no one to answer it, prints this line, rejects, records the rejection on the assistant
+# message and exits 1.
+_DOOM_LOOP_REJECTED = re.compile(r"permission requested: doom_loop \([^)\n]*\); auto-rejecting")
+_PERMISSION_REJECTED = "The user rejected permission to use this specific tool call."
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _extract_instruction(body_input) -> tuple[str, Optional[str]]:
@@ -682,6 +688,27 @@ class OpenCodeAgent(SimpleResponsesAPIAgent):
             and name in finishes
             and native_result.get("finish") == finishes[name]
             and bool(native_result.get("time", {}).get("completed"))
+        )
+
+    @staticmethod
+    def _doom_loop_rejection(native_result: Mapping[str, Any], cleanup: dict | None, stderr: str) -> bool:
+        """Recognize a run that OpenCode's repetition guard ended; tested on OpenCode 1.17.11.
+
+        The model repeated one tool call three times in one response, OpenCode asked for the doom_loop permission,
+        `opencode run` rejected it and exited 1 after the completed message that holds the rejection. That is the
+        model's own stop, like a context limit, not a failure of the harness or the sandbox. Any other exit, a
+        rejected permission of another kind, a cleanup error or a timeout is not this.
+        """
+        error = native_result.get("error") or {}
+        return (
+            cleanup is not None
+            and cleanup["return_code"] == 1
+            and not cleanup["timed_out"]
+            and not cleanup["error"]
+            and error.get("name") == "UnknownError"
+            and (error.get("data") or {}).get("message") == _PERMISSION_REJECTED
+            and bool(native_result.get("time", {}).get("completed"))
+            and _DOOM_LOOP_REJECTED.search(_ANSI_ESCAPE.sub("", stderr or "")) is not None
         )
 
     def classify_outcome(self, native_result: Mapping[str, Any]) -> AgentOutcome:
@@ -2203,6 +2230,13 @@ class OpenCodeAgent(SimpleResponsesAPIAgent):
         native_result = assistants[-1] if assistants else {}
         reported_error = error is None and failure is None and self._reported_model_error(native_result, result)
         context_limit = reported_error and (native_result.get("error") or {}).get("name") == _CONTEXT_OVERFLOW_ERROR
+        # The repetition guard's stop is scored like a context limit: the run is incomplete and keeps its work.
+        doom_loop = (
+            error is None
+            and failure is None
+            and not reported_error
+            and self._doom_loop_rejection(native_result, result, state.stderr)
+        )
         runtime = state.runtime_info
         if runtime is None:
             observations.gaps.append(ObservationGap(code="runtime_info_unavailable"))
@@ -2216,6 +2250,8 @@ class OpenCodeAgent(SimpleResponsesAPIAgent):
             stdout=state.activation_log,
             continuation=state.is_continuation,
         )
+        if doom_loop:
+            outcome = OpenCodeRunOutcome(status="incomplete")
         error = error or outcome.error
         # Without a recorded status, work the model did cannot count: the required tools were never confirmed.
         # A run that failed for another reason, or made no model call and ended early (timeout), keeps its cause.
@@ -2241,12 +2277,16 @@ class OpenCodeAgent(SimpleResponsesAPIAgent):
                 record.status = "incomplete" if isinstance(failure, asyncio.CancelledError) else status
                 if state.is_continuation:
                     record.duration_ms = (monotonic() - started) * 1000
-                    record.stop_reason = "context_limit" if context_limit else outcome.error_type
+                    record.stop_reason = (
+                        "context_limit" if context_limit else "doom_loop" if doom_loop else outcome.error_type
+                    )
                 record.error_type = outcome.error_type
                 if isinstance(failure, asyncio.CancelledError):
                     record.error_type = "cancelled"
                 elif context_limit:
                     record.error_type = "context_limit"
+                elif doom_loop:
+                    record.error_type = "doom_loop"
                 elif reported_error:
                     record.error_type = "provider_error"
                 elif error or failure:
@@ -2273,7 +2313,7 @@ class OpenCodeAgent(SimpleResponsesAPIAgent):
                     exit_code=result["return_code"] if not timed_out else None,
                     # The same category the root invocation carries for the stop or failure.
                     error_type="process_exit"
-                    if reported_error
+                    if reported_error or doom_loop
                     else {"cancelled": "cancelled", "failed": "server_error"}.get(sandbox_outcome),
                 )
             )

@@ -2800,6 +2800,113 @@ async def test_context_limit_preserves_partial_work_without_hiding_cleanup_failu
         assert root.error_type == "context_limit"
 
 
+DOOM_LOOP_STDERR = "\x1b[93m\x1b[1m! \x1b[0mpermission requested: doom_loop (bash); auto-rejecting\n"
+
+
+def doom_loop_events() -> str:
+    """A run that OpenCode 1.17.11's repetition guard stopped: one response with three identical bash calls, cut off
+    when `opencode run` rejected the doom_loop permission (the rejection recorded on the completed message)."""
+    export = json.loads(events())
+    call = {
+        "type": "tool",
+        "tool": "bash",
+        "state": {"status": "error", "input": {"command": "ls /testbed"}, "error": "Tool execution aborted"},
+    }
+    export["messages"][-1] = {
+        "info": {
+            "role": "assistant",
+            "time": {"created": 99, "completed": 100},
+            "finish": "tool-calls",
+            "tokens": {"input": 10, "output": 6, "reasoning": 1, "cache": {"read": 3}, "total": 16},
+            "error": {
+                "name": "UnknownError",
+                "data": {"message": "The user rejected permission to use this specific tool call."},
+            },
+        },
+        "parts": [{"type": "reasoning", "text": "List the videos"}]
+        + [{**call, "callID": f"tool-{index}"} for index in (1, 2, 3)],
+    }
+    return json.dumps(export)
+
+
+def leave_stderr(sandbox, text):
+    """The run leaves ``text`` in its session's stderr.log when it exits."""
+    exit_run = sandbox.wait_exit
+
+    async def wait_exit():
+        code = await exit_run()
+        sandbox.files[f"{sandbox.directory}/stderr.log"] = text
+        return code
+
+    sandbox.wait_exit = wait_exit
+
+
+@pytest.mark.parametrize("cleanup_error", [None, "cleanup failed"])
+async def test_doom_loop_stop_is_scored_like_a_limit_not_retried(setup, tmp_path, cleanup_error):
+    from nemo_gym.agents import OutcomeAction, agent_outcome_policy
+
+    agent, sandbox = setup
+    sandbox.events = doom_loop_events()
+    sandbox.result.update(return_code=1, error=cleanup_error)
+    leave_stderr(sandbox, DOOM_LOOP_STDERR)
+    capture_observations(sandbox, tmp_path)
+    request, session_id, task = await activate(agent, sandbox)
+    if cleanup_error:
+        with pytest.raises(HTTPException):
+            await task
+    else:
+        response = await task
+        assert response.status == "incomplete"
+        assert response.error is None
+        assert response.output
+        assert AGENT_OUTCOME_METADATA_KEY not in response.metadata
+        assert agent_outcome_policy(response) == OutcomeAction.VERIFY
+    closed = await agent.close_agent_session(request, AgentCloseSessionRequest(**close_body(session_id)))
+    root = next(r for r in closed.agent_observations.records if r.kind == "agent_invocation")
+    assert root.status == ("failed" if cleanup_error else "incomplete")
+    if not cleanup_error:
+        assert root.error_type == "doom_loop"
+        sandbox_record = next(r for r in closed.agent_observations.records if r.kind == "sandbox")
+        assert (sandbox_record.exit_code, sandbox_record.error_type) == (1, "process_exit")
+
+
+async def test_another_rejected_permission_still_fails_the_run(setup):
+    agent, sandbox = setup
+    sandbox.events = doom_loop_events()
+    sandbox.result.update(return_code=1)
+    leave_stderr(sandbox, "! permission requested: external_directory (/data/*); auto-rejecting\n")
+    _, _, task = await activate(agent, sandbox)
+    with pytest.raises(HTTPException) as raised:
+        await task
+    assert raised.value.status_code == 502
+    assert "OpenCode exited with code 1" in raised.value.detail
+
+
+@pytest.mark.parametrize(
+    "change",
+    [None, "other_permission", "no_stderr", "worker_exit", "timeout", "cleanup_error", "message", "not_completed"],
+)
+def test_doom_loop_stop_needs_the_guards_own_rejection(change):
+    native = json.loads(doom_loop_events())["messages"][-1]["info"]
+    cleanup = {"return_code": 1, "timed_out": False, "error": None}
+    stderr = DOOM_LOOP_STDERR
+    if change == "other_permission":
+        stderr = "! permission requested: read (/app/.env); auto-rejecting\n"
+    elif change == "no_stderr":
+        stderr = ""
+    elif change == "worker_exit":
+        cleanup["return_code"] = 137
+    elif change == "timeout":
+        cleanup["timed_out"] = True
+    elif change == "cleanup_error":
+        cleanup["error"] = "cleanup failed"
+    elif change == "message":
+        native["error"]["data"]["message"] = "Tool execution aborted"
+    elif change == "not_completed":
+        native["time"] = {"created": 99}
+    assert OpenCodeAgent._doom_loop_rejection(native, cleanup, stderr) is (change is None)
+
+
 async def test_reported_native_error_is_bounded_without_losing_classification(setup):
     agent, sandbox = setup
     export = json.loads(sandbox.events)
